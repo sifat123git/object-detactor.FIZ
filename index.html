@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Object Detector</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(to right, #1c1c1c, #343434);
+      color: white;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+
+    h1 {
+      margin-top: 1rem;
+      font-size: 2rem;
+      color: #00ffcc;
+    }
+
+    .container {
+      width: 90%;
+      max-width: 600px;
+      background: #222;
+      padding: 20px;
+      border-radius: 20px;
+      box-shadow: 0 0 15px rgba(0,255,200,0.3);
+      text-align: center;
+    }
+
+    input[type="file"] {
+      margin: 10px 0;
+      border: none;
+      background: #00ffcc;
+      color: #000;
+      padding: 10px;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    video, canvas, img {
+      max-width: 100%;
+      border-radius: 12px;
+      margin-top: 10px;
+    }
+
+    #uploadedImage {
+      display: none;
+      margin-top: 10px;
+      max-width: 100%;
+      border-radius: 12px;
+    }
+
+    #resultText {
+      margin-top: 10px;
+      font-size: 1rem;
+      color: #ffdf00;
+      white-space: pre-wrap;
+    }
+
+    .btn {
+      margin: 10px;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 8px;
+      background-color: #00ffcc;
+      color: black;
+      cursor: pointer;
+      transition: 0.3s;
+    }
+
+    .btn:hover {
+      background-color: #00ccaa;
+    }
+
+    .actions {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      margin-top: 15px;
+    }
+  </style>
+</head>
+<body>
+  <h1>🎯 Object Detector</h1>
+  <div class="container">
+    <button class="btn" onclick="startCamera()">📷 Start Live Detection</button>
+    <button class="btn" onclick="stopCamera()">🛑 Stop Camera</button>
+    <button class="btn" onclick="takeScreenshot()">📸 Take Screenshot</button>
+    <button class="btn" onclick="manualDetectFromVideo()" id="liveDetectBtn" style="display:none;">🔍 Detect Current Frame</button>
+    <input type="file" accept="image/*" id="imageInput" />
+    <button class="btn" id="detectBtn" onclick="detectUploadedImage()" style="display:none;">🔍 Detect Uploaded Image</button>
+    <img id="uploadedImage" />
+    <video id="video" autoplay muted playsinline style="display:none;"></video>
+    <canvas id="canvas"></canvas>
+    <div id="resultText"></div>
+    <div class="actions" id="actionButtons" style="display:none;">
+      <button class="btn" onclick="clearCanvas()">🧹 Clear</button>
+      <button class="btn" onclick="reDetect()">🔁 New Detection</button>
+      <button class="btn" onclick="saveCanvasImage()">💾 Save Image</button>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+  <script>
+    let model, video, canvas, ctx, stream, uploadedImage;
+    const synth = window.speechSynthesis;
+
+    async function loadModel() {
+      model = await cocoSsd.load();
+      console.log('Model loaded');
+    }
+
+    function startCamera() {
+      video = document.getElementById('video');
+      canvas = document.getElementById('canvas');
+      ctx = canvas.getContext('2d');
+      video.style.display = 'block';
+      document.getElementById('uploadedImage').style.display = 'none';
+      document.getElementById('detectBtn').style.display = 'none';
+      document.getElementById('liveDetectBtn').style.display = 'inline-block';
+      document.getElementById('actionButtons').style.display = 'none';
+
+      navigator.mediaDevices.getUserMedia({ video: true })
+        .then((mediaStream) => {
+          stream = mediaStream;
+          video.srcObject = mediaStream;
+        });
+    }
+
+    function stopCamera() {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+      if (video) {
+        video.style.display = 'none';
+        video.srcObject = null;
+      }
+      document.getElementById('liveDetectBtn').style.display = 'none';
+      clearCanvas();
+    }
+
+    async function manualDetectFromVideo() {
+      if (!video) return;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0);
+      const predictions = await model.detect(video);
+      drawPredictions(predictions);
+    }
+
+    document.getElementById('imageInput').addEventListener('change', function (event) {
+      const file = event.target.files[0];
+      const reader = new FileReader();
+
+      reader.onload = function(e) {
+        uploadedImage = new Image();
+        uploadedImage.onload = function() {
+          document.getElementById('uploadedImage').src = uploadedImage.src;
+          document.getElementById('uploadedImage').style.display = 'block';
+          document.getElementById('video').style.display = 'none';
+          document.getElementById('detectBtn').style.display = 'inline-block';
+          document.getElementById('liveDetectBtn').style.display = 'none';
+        }
+        uploadedImage.src = e.target.result;
+      }
+      reader.readAsDataURL(file);
+    });
+
+    async function detectUploadedImage() {
+      if (!uploadedImage) return;
+
+      canvas = document.getElementById('canvas');
+      ctx = canvas.getContext('2d');
+
+      canvas.width = uploadedImage.width;
+      canvas.height = uploadedImage.height;
+      ctx.drawImage(uploadedImage, 0, 0);
+      const predictions = await model.detect(uploadedImage);
+      drawPredictions(predictions);
+    }
+
+    function drawPredictions(predictions) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(uploadedImage || video, 0, 0);
+      ctx.font = '16px Arial';
+      ctx.lineWidth = 2;
+      document.getElementById('resultText').innerText = '';
+
+      predictions.forEach(pred => {
+        const [x, y, width, height] = pred.bbox;
+        ctx.strokeStyle = '#00ffcc';
+        ctx.fillStyle = '#00ffcc';
+        ctx.beginPath();
+        ctx.rect(x, y, width, height);
+        ctx.stroke();
+        ctx.fillText(`${pred.class} (${(pred.score * 100).toFixed(1)}%)`, x, y > 10 ? y - 5 : 10);
+        document.getElementById('resultText').innerText += `${pred.class} - ${(pred.score * 100).toFixed(1)}%\n`;
+
+        if (pred.score > 0.75) {
+          const utter = new SpeechSynthesisUtterance(`${pred.class} detected`);
+          synth.speak(utter);
+        }
+      });
+
+      document.getElementById('actionButtons').style.display = 'flex';
+    }
+
+    function clearCanvas() {
+      if (ctx && canvas) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+      document.getElementById('resultText').innerText = '';
+      document.getElementById('actionButtons').style.display = 'none';
+    }
+
+    function reDetect() {
+      if (uploadedImage) {
+        detectUploadedImage();
+      } else {
+        manualDetectFromVideo();
+      }
+    }
+
+    function saveCanvasImage() {
+      const link = document.createElement('a');
+      link.download = 'detected-image.png';
+      link.href = canvas.toDataURL();
+      link.click();
+    }
+
+    function takeScreenshot() {
+      const link = document.createElement('a');
+      link.download = 'screenshot.png';
+      link.href = canvas.toDataURL();
+      link.click();
+    }
+
+    loadModel();
+  </script>
+</body>
+</html>
